@@ -1,0 +1,18 @@
+# Remove unnecessary files to push and pull
+
+# Build/temporary files
+*.jou
+*.log
+*.str
+*.zip
+*.xpr
+*.dcp
+
+# Build folders
+.runs/
+.cache/
+.hw/
+.ip_user_files/
+.sim/
+.webtalk/
+.xpr/
