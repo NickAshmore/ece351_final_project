@@ -1,175 +1,254 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 11/19/2025 03:31:41 PM
-// Design Name: 
-// Module Name: gprmc_parser
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
 
 module gprmc_parser (
-    input  wire       clk,
-    input  wire       rst,
+    input clk,
+    input rst,
 
-    input  wire [7:0] rx_data,
-    input  wire       rx_valid,
+    // UART input
+    input [7:0] rx_data,
+    input       rx_valid,
 
-    // Flattened latitude output (max 10 digits)
-    output reg [7:0] lat0,
-    output reg [7:0] lat1,
-    output reg [7:0] lat2,
-    output reg [7:0] lat3,
-    output reg [7:0] lat4,
-    output reg [7:0] lat5,
-    output reg [7:0] lat6,
-    output reg [7:0] lat7,
-    output reg [7:0] lat8,
-    output reg [7:0] lat9,
-    output reg [3:0] lat_len,
-    output reg       lat_dir,      // 1=N, 0=S
+    // Fix status output
+    output reg fix_valid,    // 1 = Active (A), 0 = Void (V)
 
-    // Flattened longitude output (max 11 digits)
-    output reg [7:0] lon0,
-    output reg [7:0] lon1,
-    output reg [7:0] lon2,
-    output reg [7:0] lon3,
-    output reg [7:0] lon4,
-    output reg [7:0] lon5,
-    output reg [7:0] lon6,
-    output reg [7:0] lon7,
-    output reg [7:0] lon8,
-    output reg [7:0] lon9,
-    output reg [7:0] lon10,
-    output reg [3:0] lon_len,
-    output reg       lon_dir,      // 1=E, 0=W
+    // Latitude ASCII digits
+    output [7:0] lat0, lat1, lat2, lat3, lat4, lat5, lat6, lat7,
 
-    output reg       new_fix
+    // Longitude ASCII digits
+    output [7:0] lon0, lon1, lon2, lon3, lon4, lon5, lon6, lon7,
+
+    // Speed ASCII digits (knots)
+    output [7:0] spd0, spd1, spd2, spd3, spd4, spd5,
+    output reg   speed_ready
 );
 
-    // FSM
-    localparam WAIT_DOLLAR = 0;
-    localparam MATCH_G     = 1;
-    localparam MATCH_P     = 2;
-    localparam MATCH_R     = 3;
-    localparam MATCH_M     = 4;
-    localparam MATCH_C     = 5;
-    localparam READ_FIELDS = 6;
 
-    reg [3:0] state = WAIT_DOLLAR;
-    reg [3:0] comma_count = 0;
-    
-      reg [3:0] lat_idx = 0;
-    reg [3:0] lon_idx = 0;
+// ---------------------------
+// Internal Registers
+// ---------------------------
 
-    always @(posedge clk) begin
-        if (rst) begin
-            state       <= WAIT_DOLLAR;
+// State tracking
+reg seen_g;
+reg seen_p;
+reg seen_r;
+
+// Comma counting
+reg [3:0] comma_count;
+
+// Status (A/V)
+reg [7:0] status_char;
+
+// Latitude registers
+reg [7:0] lat0_reg, lat1_reg, lat2_reg, lat3_reg;
+reg [7:0] lat4_reg, lat5_reg, lat6_reg, lat7_reg;
+reg [3:0] lat_len;
+
+// Longitude registers
+reg [7:0] lon0_reg, lon1_reg, lon2_reg, lon3_reg;
+reg [7:0] lon4_reg, lon5_reg, lon6_reg, lon7_reg;
+reg [3:0] lon_len;
+
+// Speed registers
+reg [7:0] spd0_reg, spd1_reg, spd2_reg, spd3_reg, spd4_reg, spd5_reg;
+reg [2:0] speed_len;
+
+
+// ---------------------------
+// Sequential Logic
+// ---------------------------
+always @(posedge clk) begin
+    if (rst) begin
+        seen_g <= 0;
+        seen_p <= 0;
+        seen_r <= 0;
+
+        comma_count  <= 0;
+
+        lat_len <= 0;
+        lon_len <= 0;
+        speed_len <= 0;
+
+        fix_valid   <= 0;
+        speed_ready <= 0;
+    end
+    else if (rx_valid) begin
+       
+        // -------------------------------
+        // Detect "$GPRMC"
+        // -------------------------------
+        
+        if (rx_data == "$") begin
+            lat0_reg <= "0";
+            lat1_reg <= "0";
+            lat2_reg <= "0";
+            lat3_reg <= "0";
+            lat4_reg <= "0";
+            lat5_reg <= "0";
+            lat6_reg <= "0";
+            lat7_reg <= "0";
+
+            lon0_reg <= "0";
+            lon1_reg <= "0";
+            lon2_reg <= "0";
+            lon3_reg <= "0";
+            lon4_reg <= "0";
+            lon5_reg <= "0";
+            lon6_reg <= "0";
+            lon7_reg <= "0";
+
+            spd0_reg <= "0";
+            spd1_reg <= "0";
+            spd2_reg <= "0";
+            spd3_reg <= "0";
+            spd4_reg <= "0";
+            spd5_reg <= "0";
+
             comma_count <= 0;
-            lat_idx     <= 0;
-            lon_idx     <= 0;
-            new_fix     <= 0;
-        end else if (rx_valid) begin
-            new_fix <= 0;
+            lat_len   <= 0;
+            lon_len   <= 0;
+            speed_len   <= 0;
 
-            case (state)
+            // IMPORTANT: do NOT "skip" the rest of the parser
+            // Just continue to next byte
+        end
+        
+        if (!seen_g && rx_data == "$")
+            seen_g <= 1;
+        else if (seen_g && !seen_p && rx_data == "G")
+            seen_p <= 1;
+        else if (seen_g && seen_p && !seen_r && rx_data == "P")
+            seen_r <= 1;
+       
+        // Fully detected "$GPR"
+        if (seen_g && seen_p && seen_r && rx_data == "M") begin
+            comma_count <= 0;
+        end
 
-            WAIT_DOLLAR:
-                if (rx_data == "$")
-                    state <= MATCH_G;
+        // Count commas AFTER "$GPRMC"
+        if (rx_data == "," && seen_r)
+            comma_count <= comma_count + 1;
 
-            MATCH_G:
-                state <= (rx_data == "G") ? MATCH_P : WAIT_DOLLAR;
 
-            MATCH_P:
-                state <= (rx_data == "P") ? MATCH_R : WAIT_DOLLAR;
+        // ---------------------------------
+        // FIELD 2 ? Fix Status (A or V)
+        // comma_count = 1
+        // ---------------------------------
+        if (comma_count == 1 && rx_data != ",") begin
+            status_char <= rx_data;
+            fix_valid <= (rx_data == "A") ? 1'b1 : 1'b0;
+        end
 
-            MATCH_R:
-                state <= (rx_data == "R") ? MATCH_M : WAIT_DOLLAR;
 
-            MATCH_M:
-                state <= (rx_data == "M") ? MATCH_C : WAIT_DOLLAR;
+        // ---------------------------------
+        // FIELD 3 ? Latitude (DDMMmmmm)
+        // comma_count = 2
+        // ---------------------------------
+        if (comma_count == 2) begin
+            if (rx_data != ",") begin
+                case(lat_len)
+                    0: lat0_reg <= rx_data;
+                    1: lat1_reg <= rx_data;
+                    2: lat2_reg <= rx_data;
+                    3: lat3_reg <= rx_data;
+                    4: lat4_reg <= rx_data;
+                    5: lat5_reg <= rx_data;
+                    6: lat6_reg <= rx_data;
+                    7: lat7_reg <= rx_data;
+                endcase
+                if (lat_len < 7) lat_len <= lat_len + 1;
+            end
+            else begin
+                lat_len <= 0;
+            end
+        end
 
-            MATCH_C:
-                if (rx_data == "C") begin
-                    state        <= READ_FIELDS;
-                    comma_count  <= 0;
-                    lat_idx      <= 0;
-                    lon_idx      <= 0;
-                end else begin
-                    state        <= WAIT_DOLLAR;
-                end
 
-            READ_FIELDS: begin
-                if (rx_data == ",")
-                    comma_count <= comma_count + 1;
+        // ---------------------------------
+        // FIELD 5 ? Longitude
+        // comma_count = 4
+        // ---------------------------------
+        if (comma_count == 4) begin
+            if (rx_data != ",") begin
+                case(lon_len)
+                    0: lon0_reg <= rx_data;
+                    1: lon1_reg <= rx_data;
+                    2: lon2_reg <= rx_data;
+                    3: lon3_reg <= rx_data;
+                    4: lon4_reg <= rx_data;
+                    5: lon5_reg <= rx_data;
+                    6: lon6_reg <= rx_data;
+                    7: lon7_reg <= rx_data;
+                endcase
+                if (lon_len < 7) lon_len <= lon_len + 1;
+            end
+            else begin
+                lon_len <= 0;
+            end
+        end
 
-                else begin
-                    // FIELD 3 - Latitude digits
-                    if (comma_count == 2) begin
-                        case (lat_idx)
-                            0: lat0  <= rx_data;
-                            1: lat1  <= rx_data;
-                            2: lat2  <= rx_data;
-                            3: lat3  <= rx_data;
-                            4: lat4  <= rx_data;
-                            5: lat5  <= rx_data;
-                            6: lat6  <= rx_data;
-                            7: lat7  <= rx_data;
-                            8: lat8  <= rx_data;
-                            9: lat9  <= rx_data;
-                        endcase
-                        lat_idx <= lat_idx + 1;
-                    end
 
-                    // FIELD 4 - N/S
-                    if (comma_count == 3) begin
-                        lat_dir <= (rx_data == "N") ? 1 : 0;
-                    end
+        // ---------------------------------
+        // FIELD 7 ? Speed in knots (ASCII)
+        // comma_count = 6
+        // ---------------------------------
+        if (comma_count == 6) begin
 
-                    // FIELD 5 - Longitude digits
-                    if (comma_count == 4) begin
-                        case (lon_idx)
-                            0: lon0  <= rx_data;
-                            1: lon1  <= rx_data;
-                            2: lon2  <= rx_data;
-                            3: lon3  <= rx_data;
-                            4: lon4  <= rx_data;
-                            5: lon5  <= rx_data;
-                            6: lon6  <= rx_data;
-                            7: lon7  <= rx_data;
-                            8: lon8  <= rx_data;
-                            9: lon9  <= rx_data;
-                            10: lon10 <= rx_data;
-                        endcase
-                        lon_idx <= lon_idx + 1;
-                    end
+            if (rx_data != ",") begin
+                case(speed_len)
+                    0: spd0_reg <= rx_data;
+                    1: spd1_reg <= rx_data;
+                    2: spd2_reg <= rx_data;
+                    3: spd3_reg <= rx_data;
+                    4: spd4_reg <= rx_data;
+                    5: spd5_reg <= rx_data;
+                endcase
 
-                    // FIELD 6 - E/W ? done
-                    if (comma_count == 5) begin
-                        lon_dir <= (rx_data == "E") ? 1 : 0;
-
-                        lat_len <= lat_idx;
-                        lon_len <= lon_idx;
-
-                        new_fix <= 1;
-                        state   <= WAIT_DOLLAR;
-                    end
-                end
+                if (speed_len < 6)
+                    speed_len <= speed_len + 1;
+                    
+                speed_ready <=1'b0;
             end
 
-            endcase
+            else begin
+                speed_ready <= 1'b1;
+                speed_len   <= 0;
+            end
         end
+        else begin
+            speed_ready <= 0; // pulse only for one comma
+        end
+
     end
+end
+
+
+// ---------------------------------
+// Output assignments
+// ---------------------------------
+
+assign lat0 = lat0_reg;
+assign lat1 = lat1_reg;
+assign lat2 = lat2_reg;
+assign lat3 = lat3_reg;
+assign lat4 = lat4_reg;
+assign lat5 = lat5_reg;
+assign lat6 = lat6_reg;
+assign lat7 = lat7_reg;
+
+assign lon0 = lon0_reg;
+assign lon1 = lon1_reg;
+assign lon2 = lon2_reg;
+assign lon3 = lon3_reg;
+assign lon4 = lon4_reg;
+assign lon5 = lon5_reg;
+assign lon6 = lon6_reg;
+assign lon7 = lon7_reg;
+
+assign spd0 = spd0_reg;
+assign spd1 = spd1_reg;
+assign spd2 = spd2_reg;
+assign spd3 = spd3_reg;
+assign spd4 = spd4_reg;
+assign spd5 = spd5_reg;
+
 endmodule
