@@ -68,13 +68,13 @@ gprmc_fix_detector detector (
 assign led[0] = fix_ok;
 assign led[1] = fix_bad;
 
-wire [9:0] lat0, lat1, lat2, lat3, lat4, lat5, lat6, lat7, lat8, lat9;
-wire [10:0] lon0, lon1, lon2, lon3, lon4, lon5, lon6, lon7, lon8, lon9, lon10;
-wire [3:0] lat_len;
-wire [3:0] lon_len;
-wire       lat_dir;
-wire       lon_dir;
-wire       new_fix;
+wire [9:0] lat0, lat1, lat2, lat3, lat4, lat5, lat6, lat7;
+wire [10:0] lon0, lon1, lon2, lon3, lon4, lon5, lon6, lon7;
+
+wire [7:0] spd0, spd1, spd2, spd3, spd4, spd5;
+wire [3:0] speed_len;
+wire speed_ready;
+wire new_fix = speed_ready;
 
 gprmc_parser PARSER (
     .clk(clk),
@@ -90,10 +90,6 @@ gprmc_parser PARSER (
     .lat5(lat5),
     .lat6(lat6),
     .lat7(lat7),
-    .lat8(lat8),
-    .lat9(lat9),
-    .lat_len(lat_len),
-    .lat_dir(lat_dir),
 
     .lon0(lon0),
     .lon1(lon1),
@@ -103,31 +99,42 @@ gprmc_parser PARSER (
     .lon5(lon5),
     .lon6(lon6),
     .lon7(lon7),
-    .lon8(lon8),
-    .lon9(lon9),
-    .lon10(lon10),
-    .lon_len(lon_len),
-    .lon_dir(lon_dir),
-
-    .new_fix(new_fix)
+    
+    .spd0(spd0),
+    .spd1(spd1),
+    .spd2(spd2),
+    .spd3(spd3),
+    .spd4(spd4),
+    .spd5(spd5),
+    
+    .speed_ready(speed_ready)
 );
+
+speed_extract SPEEDX (
+    .clk(clk),
+    .rst(rst),
+    .new_fix(new_fix),     // you already have: new_fix = speed_ready
+
+    .spd0(spd0),
+    .spd1(spd1),
+    .spd2(spd2),
+    .spd3(spd3),
+    .spd4(spd4),
+    .spd5(spd5),
+    .speed_len(speed_len),
+
+    .speed_scaled(speed_scaled),   // knots × 10
+    .speed_valid(speed_valid)
+);
+
 
 wire [3:0] d0;
 wire [3:0] d1;
 wire [3:0] d2;
 wire [3:0] d3;
 
-wire [7:0] lat0 = lat_digits[0];
-wire [7:0] lat1 = lat_digits[1];
-wire [7:0] lat2 = lat_digits[2];
-wire [7:0] lat3 = lat_digits[3];
-wire [7:0] lat4 = lat_digits[4];
-wire [7:0] lat5 = lat_digits[5];
-wire [7:0] lat6 = lat_digits[6];
-wire [7:0] lat7 = lat_digits[7];
-wire [7:0] lat8 = lat_digits[8];
-wire [7:0] lat9 = lat_digits[9];
 
+/*
 ddmm_extract DDMM (
     .clk(clk),
     .rst(rst),
@@ -137,28 +144,46 @@ ddmm_extract DDMM (
     .lat1(lat1),
     .lat2(lat2),
     .lat3(lat3),
-    .lat4(lat4),
-    .lat5(lat5),
-    .lat6(lat6),
-    .lat7(lat7),
-    .lat8(lat8),
-    .lat9(lat9),
-    .lat_len(lat_len),
+//    .lat4(lat4),
+//    .lat5(lat5),
+//    .lat6(lat6),
+//    .lat7(lat7),
 
     .d0(d0),
     .d1(d1),
     .d2(d2),
     .d3(d3)
 );
+*/
+
+wire [3:0] d0_pace, d1_pace, d2_pace, d3_pace;
+wire [15:0] pace_seconds;
+wire pace_valid;
+
+pace_converter PACER (
+    .clk(clk),
+    .rst(rst),
+    .speed_valid(speed_valid),
+    .speed_scaled(speed_scaled),
+
+    .pace_seconds(pace_seconds),
+    .pace_valid(pace_valid),
+
+    .d0_pace(d0_pace),
+    .d1_pace(d1_pace),
+    .d2_pace(d2_pace),
+    .d3_pace(d3_pace)
+);
+
 
 seven_seg_driver DISP (
     .clk(clk),
     .rst(rst),
 
-    .d0(d0),
-    .d1(d1),
-    .d2(d2),
-    .d3(d3),
+    .d0(d0_pace),
+    .d1(d1_pace),
+    .d2(d2_pace),
+    .d3(d3_pace),
 
     .an(an),
     .seg(seg)
