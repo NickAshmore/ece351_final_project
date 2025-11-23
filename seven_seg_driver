@@ -1,0 +1,93 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: 
+// 
+// Create Date: 11/23/2025 12:48:40 PM
+// Design Name: 
+// Module Name: sevenseg_driver
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+
+`timescale 1ns / 1ps
+
+module seven_seg_driver (
+    input        clk,
+    input        rst,
+    input  [3:0] d0,
+    input  [3:0] d1,
+    input  [3:0] d2,
+    input  [3:0] d3,
+    output reg [3:0] an,
+    output     [6:0] seg
+);
+
+    // Refresh
+    reg [15:0] refresh_cnt = 16'd0;
+    reg [1:0]  digit_sel   = 2'd0;
+    reg [3:0]  current_digit;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            refresh_cnt <= 16'd0;
+            digit_sel   <= 2'd0;
+        end else begin
+            refresh_cnt <= refresh_cnt + 1'b1;
+            digit_sel   <= refresh_cnt[15:14];
+        end
+    end
+
+
+    always @* begin
+        case (digit_sel)
+            2'b00: begin
+                an           = 4'b0111;
+                current_digit = d0;
+            end
+            2'b01: begin
+                an           = 4'b1011;
+                current_digit = d1;
+            end
+            2'b10: begin
+                an           = 4'b1101;
+                current_digit = d2;
+            end
+            2'b11: begin
+                an           = 4'b1110;
+                current_digit = d3;
+            end
+        endcase
+    end
+
+    reg [6:0] seg_r;
+
+    always @* begin
+        case (current_digit)
+            4'd0: seg_r = 7'b1000000;
+            4'd1: seg_r = 7'b1111001;
+            4'd2: seg_r = 7'b0100100;
+            4'd3: seg_r = 7'b0110000;
+            4'd4: seg_r = 7'b0011001;
+            4'd5: seg_r = 7'b0010010;
+            4'd6: seg_r = 7'b0000010;
+            4'd7: seg_r = 7'b1111000;
+            4'd8: seg_r = 7'b0000000;
+            4'd9: seg_r = 7'b0010000;
+            default: seg_r = 7'b1111111;  // blank
+        endcase
+    end
+
+    assign seg = seg_r;
+
+endmodule
