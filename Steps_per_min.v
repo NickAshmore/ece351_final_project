@@ -25,7 +25,7 @@ module steps_per_min(input clk, rst, [15:0]step_count, output [15:0]spm);
         if(rst)
             r_spm <= 0;
         else if (sec_count != 0)
-            r_spm <= (step_count / sec_count) * 16'd60;
+            r_spm <= (step_count * 16'd60) / sec_count;
     end
     
     assign spm = r_spm;
