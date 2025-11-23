@@ -1,118 +1,102 @@
+// top.v
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 11/23/2025 12:15:06 PM
-// Design Name: 
-// Module Name: Top
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
 
 module top (
-    input        clk,
-    input        rst,
-    input        gps_rx,
-    input  [15:0] sw,
-    output       tx,
-    output [3:0] an,
-    output [6:0] seg
+    input  wire clk,          // 100 MHz
+    input  wire btnC,         // reset button
+
+    // SPI pins to Pmod ACL2 (map these to JA in XDC)
+    output wire acl_sclk,
+    output wire acl_mosi,
+    input  wire acl_miso,
+    output wire acl_cs_n,
+
+    // 7-seg
+    output wire [6:0] seg,
+    output wire [3:0] an,
+    output wire       dp
 );
+    // Simple reset (active-high)
+    wire reset = btnC;
 
+    // -------------------------------
+    // ADXL362: raw Z + valid strobe
+    // -------------------------------
+    wire signed [15:0] z_data;
+    wire               z_valid;
 
-    // STEP SIDE
-
-
-    reg [15:0] step_count = 16'd0;
-    reg [25:0] step_div   = 26'd0;
-
-    always @(posedge clk) begin
-        if (rst) begin
-            step_div   <= 26'd0;
-            step_count <= 16'd0;
-        end else begin
-            step_div <= step_div + 1'b1;
-            // increment roughly every 0.5 second
-            if (step_div == 26'd49_999_999) begin
-                step_div   <= 26'd0;
-                step_count <= step_count + 1'b1;
-            end
-        end
-    end
-
-    // Steps per minute
-    wire [15:0] spm;
-
-    steps_per_min SPM_INST (
-        .clk(clk),
-        .rst(rst),
-        .step_count(step_count),
-        .spm(spm)
+    adxl362_simple u_acl (
+        .clk      (clk),
+        .reset    (reset),
+        .spi_cs_n (acl_cs_n),
+        .spi_sclk (acl_sclk),
+        .spi_mosi (acl_mosi),
+        .spi_miso (acl_miso),
+        .z_data   (z_data),
+        .z_valid  (z_valid)
     );
 
+    // -----------------------------------
+    // Preprocess: baseline + dynamic + |·|
+    // -----------------------------------
+    wire signed [15:0] z_baseline;
+    wire signed [15:0] z_dynamic;
+    wire        [15:0] z_dynamic_abs;
+    wire               dyn_valid;
 
-    // sw[14] = 0 total steps
-    // sw[14] = 1 steps per minute
-    wire [15:0] step_display_value;
-    assign step_display_value = (sw[14] == 1'b0) ? step_count : spm;
-
-    wire [3:0] step_d0;
-    wire [3:0] step_d1;
-    wire [3:0] step_d2;
-    wire [3:0] step_d3;
-
-    bin_to_bcd_4digits STEP_BCD (
-        .value(step_display_value),
-        .d0(step_d0),
-        .d1(step_d1),
-        .d2(step_d2),
-        .d3(step_d3)
+    accel_preprocess #(
+        .BASELINE_SHIFT(6)        // tune this later if needed
+    ) u_pre (
+        .clk           (clk),
+        .reset         (reset),
+        .z_data        (z_data),
+        .z_valid       (z_valid),
+        .z_baseline    (z_baseline),
+        .z_dynamic     (z_dynamic),
+        .z_dynamic_abs (z_dynamic_abs),
+        .dyn_valid     (dyn_valid)
     );
 
-    //7 segment
-    wire [3:0] an_step;
-    wire [6:0] seg_step;
+    // -------------------------
+    // Step detector
+    // -------------------------
+    wire        step_pulse;
+    wire [15:0] step_count;
+    wire        in_peak_dbg;
+    wire [15:0] peak_len_dbg;
+    wire [15:0] gap_dbg;
 
-    seven_seg_driver STEP_DISP (
-        .clk(clk),
-        .rst(rst),
-        .d0(step_d0),
-        .d1(step_d1),
-        .d2(step_d2),
-        .d3(step_d3),
-        .an(an_step),
-        .seg(seg_step)
+    step_detector #(
+        // You can tweak these later after you see behavior
+        .TH_HIGH              (16'd250),
+        .TH_LOW               (16'd150),
+        .MIN_PEAK_SAMPLES     (8),
+        .MAX_PEAK_SAMPLES     (200),
+        .MIN_STEP_GAP_SAMPLES (200)
+    ) u_step (
+        .clk              (clk),
+        .reset            (reset),
+        .dyn_valid        (dyn_valid),
+        .z_dynamic_abs    (z_dynamic_abs),
+        .step_pulse       (step_pulse),
+        .step_count       (step_count),
+        .in_peak          (in_peak_dbg),
+        .peak_len_samples (peak_len_dbg),
+        .gap_samples      (gap_dbg)
     );
 
-    // GPS
-    wire [3:0] an_gps;
-    wire [6:0] seg_gps;
-    wire [1:0] gps_led;
-
-    gps_display_top GPS_TOP (
+    // -----------------------------------
+    // 7-seg display: show step_count
+    // -----------------------------------
+    sevenseg_hex u_disp (
         .clk   (clk),
-        .rst   (rst),
-        .gps_rx(gps_rx),
-        .tx    (tx),
-        .led   (gps_led),
-        .an    (an_gps),
-        .seg   (seg_gps)
+        .reset (reset),
+        .value (step_count),   // was z_abs before; now step counter
+        .seg   (seg),
+        .an    (an),
+        .dp    (dp)
     );
-
-//Mode
-    // sw[15] = 0 steps
-    // sw[15] = 1 GPS
-    assign an  = (sw[15] == 1'b0) ? an_step : an_gps;
-    assign seg = (sw[15] == 1'b0) ? seg_step : seg_gps;
 
 endmodule
+
+
