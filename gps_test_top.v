@@ -82,10 +82,10 @@ always @(*) begin
     if (sw[0]) begin
         d0 = mph0; d1 = mph1; d2 = mph2; d3 = mph3;     // MPH mode
     end
-    else if (sw[2]) begin
+    else if (sw[1]) begin
         d0 = lon0; d1 = lon1; d2 = lon2; d3 = lon3; // Longitude
     end
-    else begin
+    else if (sw[2]) begin
         d0 = lat0; d1 = lat1; d2 = lat2; d3 = lat3; // Latitude (default)
     end
 
